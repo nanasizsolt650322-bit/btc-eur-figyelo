@@ -8,6 +8,8 @@ Magyar nyelvű, telepíthető webalkalmazás Androidra és PC-re.
 - EMA 9/21, RSI 14 és rövid távú lendület
 - Lehetséges fordulópontok jelzése
 - Összesített emelkedő / csökkenő / kivárás állapot
+- Funding rate és Open Interest a Binance BTCUSDT határidős piacáról
+- Long / short likvidálási események követése Binance WebSocketen (csak az oldal futása alatt gyűjtött adatok)
 - Böngészős értesítések, ha az oldal nyitva van
 - Mobil- és asztali képernyőre igazodó felület
 
