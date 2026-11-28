@@ -24,6 +24,8 @@
 <div class="grid" style="margin-top:12px">
 <div class="signal"><div class="small">Funding</div><div id="funding" class="direction neutral">—</div><div id="fundingNote" class="small">—</div></div>
 <div class="signal"><div class="small">Open Interest</div><div id="oi" class="direction">—</div><div id="oiNote" class="small">1 órás változás: gyűjtés</div></div>
+<div class="signal"><div class="small">Piaci Long/Short · 5m</div><div id="globalLS" class="direction neutral">—</div><div id="globalLSNote" class="small">Számarány · Binance</div></div>
+<div class="signal"><div class="small">Nagy szereplők pozíciója · 5m</div><div id="topLS" class="direction neutral">—</div><div id="topLSNote" class="small">Pozícióarány · Binance</div></div>
 <div class="signal"><div class="small">Long likvidálás · 1h</div><div id="long1" class="direction down">—</div><div class="small">Észlelt Binance események</div></div>
 <div class="signal"><div class="small">Short likvidálás · 1h</div><div id="short1" class="direction up">—</div><div class="small">Észlelt Binance események</div></div>
 <div class="signal"><div class="small">Long likvidálás · 4h</div><div id="long4" class="direction down">—</div><div class="small">Helyben mentett adatok</div></div>
@@ -55,7 +57,53 @@ function addLiquidation(ev){const o=ev.o||{},qty=Number(o.z||o.q||0),p=Number(o.
 function liqSum(hours){const since=Date.now()-hours*3600000;return state.liqs.filter(x=>x.time>=since).reduce((s,x)=>{if(x.side==="SELL")s.long+=x.usd;else if(x.side==="BUY")s.short+=x.usd;return s},{long:0,short:0})}
 function renderLiq(){const a=liqSum(1),b=liqSum(4);$("long1").textContent=usd(a.long);$("short1").textContent=usd(a.short);$("long4").textContent=usd(b.long);$("short4").textContent=usd(b.short)}
 function connectLiquidations(){if(state.ws&&state.ws.readyState<=1)return;try{state.ws=new WebSocket("wss://fstream.binance.com/ws/btcusdt@forceOrder");state.ws.onopen=()=>{$("positionUpdated").textContent="Binance likvidálási stream kapcsolódva · helyi előzmény betöltve";};state.ws.onmessage=e=>{try{addLiquidation(JSON.parse(e.data));renderLiq();renderPositionSignal()}catch(err){console.warn(err)}};state.ws.onerror=()=>{$("positionUpdated").textContent="Binance stream hiba – újracsatlakozás folyamatban"};state.ws.onclose=()=>{state.ws=null;clearTimeout(state.reconnect);state.reconnect=setTimeout(connectLiquidations,8000)}}catch(e){$("positionUpdated").textContent="WebSocket nem indítható: "+e.message}}
-async function loadPosition(){try{const [f,o]=await Promise.all([getJSON("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"),getJSON("https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT")]);const now=Date.now(),funding=Number(f.lastFundingRate)*100,oi=Number(o.openInterest),mark=Number(f.markPrice);state.oi.push({time:now,value:oi,price:mark});state.oi=state.oi.filter(x=>now-x.time<6*3600000).slice(-400);write("btcOiSamples",state.oi);const previous=state.oi.find(x=>now-x.time>=55*60000&&now-x.time<=75*60000);state.oiDelta=previous?(oi/previous.value-1)*100:null;state.oiPriceDelta=previous&&previous.price?(mark/previous.price-1)*100:null;state.funding=funding;$("funding").textContent=(funding>=0?"+":"")+funding.toFixed(4)+"%";$("funding").className="direction "+(funding>0.0001?"down":funding<-.0001?"up":"neutral");$("fundingNote").textContent=funding>0.0001?"Long fizet – long túlsúly":funding<-.0001?"Short fizet – short túlsúly":"Közel semleges";$("oi").textContent=new Intl.NumberFormat("hu-HU",{maximumFractionDigits:2}).format(oi)+" BTC";$("oiNote").textContent=state.oiDelta===null?"1 órás változás: még gyűjtjük":`Kb. 1 órás OI: ${state.oiDelta>=0?"+":""}${state.oiDelta.toFixed(2)}%`;renderPositionSignal();$("positionUpdated").textContent="Derivatíva frissítve: "+new Date().toLocaleTimeString("hu-HU")}catch(e){$("positionUpdated").textContent="Binance API nem elérhető: "+e.message+" · A Kraken ár ettől még működik."}}
+async function loadPosition(){
+  try{
+    const [f,o]=await Promise.all([
+      getJSON("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"),
+      getJSON("https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT")
+    ]);
+    const now=Date.now(),funding=Number(f.lastFundingRate)*100,oi=Number(o.openInterest),mark=Number(f.markPrice);
+    if(!Number.isFinite(funding)||!Number.isFinite(oi)||!Number.isFinite(mark))throw Error("A Binance funding/OI válasz hibás");
+    state.oi.push({time:now,value:oi,price:mark});
+    state.oi=state.oi.filter(x=>now-x.time<6*3600000).slice(-400);
+    write("btcOiSamples",state.oi);
+    const previous=state.oi.find(x=>now-x.time>=55*60000&&now-x.time<=75*60000);
+    state.oiDelta=previous?(oi/previous.value-1)*100:null;
+    state.oiPriceDelta=previous&&previous.price?(mark/previous.price-1)*100:null;
+    state.funding=funding;
+    $("funding").textContent=(funding>=0?"+":"")+funding.toFixed(4)+"%";
+    $("funding").className="direction "+(funding>0.0001?"down":funding<-.0001?"up":"neutral");
+    $("fundingNote").textContent=funding>0.0001?"Long fizet – pozitív funding":funding<-.0001?"Short fizet – negatív funding":"Közel semleges";
+    $("oi").textContent=new Intl.NumberFormat("hu-HU",{maximumFractionDigits:2}).format(oi)+" BTC";
+    $("oiNote").textContent=state.oiDelta===null?"1 órás változás: még gyűjtjük":`Kb. 1 órás OI: ${state.oiDelta>=0?"+":""}${state.oiDelta.toFixed(2)}%`;
+    // These ratio endpoints are supplementary: their failure must not break funding/OI.
+    const [globalResult,topResult]=await Promise.allSettled([
+      getJSON("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1"),
+      getJSON("https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=5m&limit=1")
+    ]);
+    if(globalResult.status==="fulfilled"&&Array.isArray(globalResult.value)&&globalResult.value[0]){
+      const x=globalResult.value[0],ratio=Number(x.longShortRatio),lp=Number(x.longAccount)*100,sp=Number(x.shortAccount)*100;
+      if(Number.isFinite(ratio)&&Number.isFinite(lp)&&Number.isFinite(sp)){
+        $("globalLS").textContent=ratio.toFixed(2)+" : 1";
+        $("globalLS").className="direction "+(ratio>1?"up":ratio<1?"down":"neutral");
+        $("globalLSNote").textContent=`Long ${lp.toFixed(1)}% · Short ${sp.toFixed(1)}% · számarány`;
+      }else $("globalLSNote").textContent="A Binance arányadat hibás";
+    }else $("globalLSNote").textContent="Long/Short arány nem elérhető";
+    if(topResult.status==="fulfilled"&&Array.isArray(topResult.value)&&topResult.value[0]){
+      const x=topResult.value[0],ratio=Number(x.longShortRatio),lp=Number(x.longAccount)*100,sp=Number(x.shortAccount)*100;
+      if(Number.isFinite(ratio)&&Number.isFinite(lp)&&Number.isFinite(sp)){
+        $("topLS").textContent=ratio.toFixed(2)+" : 1";
+        $("topLS").className="direction "+(ratio>1?"up":ratio<1?"down":"neutral");
+        $("topLSNote").textContent=`Long ${lp.toFixed(1)}% · Short ${sp.toFixed(1)}% · pozíció`;
+      }else $("topLSNote").textContent="A top trader arány hibás";
+    }else $("topLSNote").textContent="Top trader arány nem elérhető";
+    renderPositionSignal();
+    $("positionUpdated").textContent="Derivatíva frissítve: "+new Date().toLocaleTimeString("hu-HU");
+  }catch(e){
+    $("positionUpdated").textContent="Binance funding/OI hiba: "+e.message+" · Ellenőrizd a netet, majd frissíts.";
+  }
+}
 function renderPositionSignal(){renderLiq();if(state.funding===null)return;const l=liqSum(1),sum=l.long+l.short;let bull=0,bear=0,notes=[];if(state.funding<-.0001){bull++;notes.push("negatív funding")}else if(state.funding>.0001){bear++;notes.push("pozitív funding")}if(state.oiDelta!==null&&state.oiDelta>.3){if(state.oiPriceDelta>0)bull++;else if(state.oiPriceDelta<0)bear++;notes.push("OI növekszik")}if(sum>0){if(l.long>l.short*1.25){bear++;notes.push("long likvidálás dominál")}else if(l.short>l.long*1.25){bull++;notes.push("short likvidálás dominál")}}const title=bull>bear?"Enyhén pozitív":bear>bull?"Enyhén negatív":"Vegyes / kivárás";$("positionSignal").innerHTML="<b>Pozicionáltság: "+title+"</b><br>"+(notes.join(" · ")||"Nincs elég adat.")+"<br><span class=small>Csak kiegészítő jelzés.</span>"}
 $("refreshBtn").onclick=()=>{loadMarket();loadPosition()};
 $("notifyBtn").onclick=async()=>{if(!("Notification"in window)){alert("A böngésző nem támogatja az értesítést.");return}const p=await Notification.requestPermission();notifyAllowed=p==="granted";$("notifyBtn").textContent=notifyAllowed?"Értesítések engedélyezve":"Értesítés nincs engedélyezve";if(notifyAllowed)sendNotice("Az értesítés működik, amíg a böngésző fut.")};
